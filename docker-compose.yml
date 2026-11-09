@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: axiom-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: axiom_user
+      POSTGRES_PASSWORD: axiom_password
+      POSTGRES_DB: axiom_db
+    networks:
+      - axiom-net
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: axiom-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - axiom-net
+    volumes:
+      - redisdata:/data
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: axiom-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP protocol port
+      - "15672:15672" # Management UI port
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - axiom-net
+
+networks:
+  axiom-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
