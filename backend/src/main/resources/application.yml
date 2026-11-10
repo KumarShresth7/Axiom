@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: axiom-gateway
+
+  # Enable Java 21 Virtual Threads
+  threads:
+    virtual:
+      enabled: true
+
+  # PostgreSQL Configuration
+  datasource:
+    url: jdbc:postgresql://localhost:5432/axiom_db
+    username: axiom_user
+    password: axiom_password
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate # Let Flyway handle the schema, JPA only validates
+    show-sql: false
+
+  # Flyway Configuration
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+  # Redis Configuration
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  # RabbitMQ Configuration
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+server:
+  port: 8080
