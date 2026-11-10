@@ -8,6 +8,7 @@ import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.function.Function;
 
+@Service
 public class JwtService {
     private static final String SECRET_KEY = "AxiomSuperSecretKeyForDevelopmentOnlyMakeItLonger";
     private static final long JWT_EXPIRATION = 86400000; // 24 hours
