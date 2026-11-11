@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Axiom STOMP Test</title>
+    <!-- Load StompJS from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7.0.0/bundles/stomp.umd.min.js"></script>
+</head>
+<body style="background-color: #121212; color: #fff; font-family: monospace; padding: 20px;">
+    <h2>Axiom Event Router Test</h2>
+    <div id="output"></div>
+
+    <script>
+        const output = document.getElementById('output');
+        const log = (msg) => output.innerHTML += `<p>> ${msg}</p>`;
+
+        const client = new StompJs.Client({
+            brokerURL: 'ws://localhost:8080/axiom-ws',
+            connectHeaders: {
+                Authorization: 'Bearer eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJwbGF5ZXIxQGF4aW9tLmNvbSIsImlhdCI6MTc5NDM4MDk5OSwiZXhwIjoxNzk0NDY3Mzk5fQ.N9ta6yFu0yjHsscBGv01GvQuB-7ykiVbqc5ozKKcb3Fy0ugupjrzkqZBWxsAScjr'
+            },
+            onConnect: () => {
+    log('Connected to Spring Boot WebSocket (JWT Validated).');
+
+    // 1. Subscribe to the Fast Path
+    client.subscribe('/topic/debate/123', (message) => {
+        log('<span style="color: #4ade80;">Fast Path Broadcast Received:</span> ' + message.body);
+    });
+
+    // 2. Wait 500ms to ensure the subscription is registered, then publish
+    setTimeout(() => {
+        const payload = {
+            matchId: '123',
+            sender: 'player1',
+            content: 'This is a logical argument.',
+            messageId: 'msg-001'
+        };
+        
+        log('Publishing message to /app/debate/123/say...');
+        client.publish({
+            destination: '/app/debate/123/say',
+            body: JSON.stringify(payload)
+        });
+    }, 500);
+},
+            onStompError: (frame) => {
+                log('<span style="color: #ef4444;">STOMP Error:</span> ' + frame.headers['message']);
+            }
+        });
+
+        client.activate();
+    </script>
+</body>
+</html>
