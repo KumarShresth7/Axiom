@@ -1,4 +1,11 @@
 package com.axiom.gateway.dto;
 
-public record DebateMessage(String matchId,String sender,String content, String messageId ) {
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public record DebateMessage(
+        @JsonProperty("matchId") String matchId,
+        @JsonProperty("sender") String sender,
+        @JsonProperty("content") String content,
+        @JsonProperty("messageId") String messageId
+) {
 }
