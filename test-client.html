@@ -17,7 +17,7 @@
         const client = new StompJs.Client({
             brokerURL: 'ws://localhost:8080/axiom-ws',
             connectHeaders: {
-                Authorization: 'Bearer eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJwbGF5ZXIxQGF4aW9tLmNvbSIsImlhdCI6MTc5NDM4MDk5OSwiZXhwIjoxNzk0NDY3Mzk5fQ.N9ta6yFu0yjHsscBGv01GvQuB-7ykiVbqc5ozKKcb3Fy0ugupjrzkqZBWxsAScjr'
+                Authorization: 'Bearer eyJhbGciOiJIUzM4NCJ9.eyJzdWIiOiJwbGF5ZXIxQGF4aW9tLmNvbSIsImlhdCI6MTc5NDU4NzM0MSwiZXhwIjoxNzk3MTc5MzQxfQ.N8ZHzPTH0VWgJxK3iDlyVVjnsj4YKZuyXNymOM3obnMxTkf2Yr9WroL1EtAewFdg'
             },
             onConnect: () => {
     log('Connected to Spring Boot WebSocket (JWT Validated).');
@@ -27,7 +27,12 @@
         log('<span style="color: #4ade80;">Fast Path Broadcast Received:</span> ' + message.body);
     });
 
-    // 2. Wait 500ms to ensure the subscription is registered, then publish
+    // 2. Subscribe to AI Moderator Flags
+    client.subscribe('/topic/debate/123/flags', (message) => {
+        log('<span style="color: #f59e0b;">AI Flag Received:</span> ' + message.body);
+    });
+
+    // 3. Wait 500ms to ensure the subscriptions are registered, then publish
     setTimeout(() => {
         const payload = {
             matchId: '123',

@@ -16,7 +16,7 @@ class DebateState(TypedDict):
     fallacy_type: Optional[str]
     explanation: Optional[str]
 
-llm = ChatGroq(temperature=0, model_name="llama3-8b-8192")
+llm = ChatGroq(temperature=0, model_name="openai/gpt-oss-20b")
 
 def evaluate_argument(state: DebateState):
     event = state["event"]
