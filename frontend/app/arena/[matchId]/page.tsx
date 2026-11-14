@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import ReactFlow, { Background, Controls, Node, Edge, addEdge, applyNodeChanges, applyEdgeChanges, BackgroundVariant } from "reactflow";
 import "reactflow/dist/style.css";
 import { useWebSocket, WebSocketProvider } from "@/components/providers/WebSocketProvider";
 import ArgumentNode from "@/components/ArgumentNode";
-import { Send } from "lucide-react";
+import { Send, Mic, MicOff, Video } from "lucide-react";
+import { useWebRTC } from "@/hooks/useWebRTC";
 
-// Register the custom node type
 const nodeTypes = { argument: ArgumentNode };
 
 function ArenaInterface() {
@@ -19,6 +19,15 @@ function ArenaInterface() {
     const [edges, setEdges] = useState<Edge[]>([]);
     const [input, setInput] = useState("");
     const [currentUser, setCurrentUser] = useState("");
+    
+    // WebRTC & A/V State
+    const { localStream, remoteStream } = useWebRTC(matchId as string, currentUser, stompClient, isConnected);
+    const localVideoRef = useRef<HTMLVideoElement>(null);
+    const remoteVideoRef = useRef<HTMLVideoElement>(null);
+    
+    // Speech-to-Text State
+    const [isListening, setIsListening] = useState(false);
+    const recognitionRef = useRef<any>(null);
 
     // Fetch identity from JWT
     useEffect(() => {
@@ -29,24 +38,98 @@ function ArenaInterface() {
         }
     }, []);
 
-    // WebSocket Subscriptions
+    // Bind WebRTC streams to video elements
+    useEffect(() => {
+        if (localVideoRef.current && localStream) {
+            localVideoRef.current.srcObject = localStream;
+            localVideoRef.current.play().catch(err => console.log("Local video play notice:", err));
+        }
+    }, [localStream]);
+
+    useEffect(() => {
+        if (remoteVideoRef.current && remoteStream) {
+            remoteVideoRef.current.srcObject = remoteStream;
+            remoteVideoRef.current.play().catch(err => console.log("Remote video play notice:", err));
+        }
+    }, [remoteStream]);
+
+    // Initialize Web Speech API
+    useEffect(() => {
+        if (typeof window !== "undefined") {
+            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                recognitionRef.current = new SpeechRecognition();
+                recognitionRef.current.continuous = true;
+                recognitionRef.current.interimResults = true;
+                recognitionRef.current.lang = "en-US";
+
+                recognitionRef.current.onresult = (event: any) => {
+                    let finalTranscript = "";
+                    let interimTranscript = "";
+
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
+
+                    if (interimTranscript) {
+                        setInput(interimTranscript); // Show live transcription in the input box
+                    }
+
+                    if (finalTranscript.trim()) {
+                        // Automatically transmit when a sentence is completed
+                        transmitMessage(finalTranscript.trim());
+                        setInput(""); 
+                    }
+                };
+
+                recognitionRef.current.onerror = (event: any) => {
+                    console.error("Speech recognition error", event.error);
+                    if (event.error === "no-speech") {
+                        return; // Ignore brief silence timeouts without stopping
+                    }
+                    setIsListening(false);
+                };
+
+                recognitionRef.current.onend = () => {
+                    setIsListening(false);
+                };
+            }
+        }
+        
+        return () => {
+            if (recognitionRef.current) recognitionRef.current.stop();
+        };
+    }, [stompClient, currentUser, matchId]); // Re-bind when connection drops/establishes
+
+    const toggleMicrophone = () => {
+        if (isListening) {
+            recognitionRef.current?.stop();
+            setIsListening(false);
+        } else {
+            setInput("");
+            recognitionRef.current?.start();
+            setIsListening(true);
+        }
+    };
+
+    // STOMP Routing logic (Fast Path + Slow Path)
     useEffect(() => {
         if (isConnected && stompClient) {
-            // 1. Fast Path: Listen for new arguments
             const debateSub = stompClient.subscribe(`/topic/debate/${matchId}`, (msg) => {
                 const message = JSON.parse(msg.body);
-                
                 setNodes((nds) => {
                     const newNode = {
                         id: message.messageId,
                         type: 'argument',
-                        position: { x: 250, y: nds.length * 150 + 50 }, // Stack nodes vertically
+                        position: { x: 250, y: nds.length * 150 + 50 },
                         data: { sender: message.sender, content: message.content }
                     };
                     return [...nds, newNode];
                 });
-
-                // Link to the previous node automatically
                 setEdges((eds) => {
                     if (nodes.length === 0) return eds;
                     const lastNodeId = nodes[nodes.length - 1].id;
@@ -54,13 +137,10 @@ function ArenaInterface() {
                 });
             });
 
-            // 2. Slow Path: Listen for AI Fallacy Flags
             const flagSub = stompClient.subscribe(`/topic/debate/${matchId}/flags`, (msg) => {
                 const flag = JSON.parse(msg.body);
-                
                 setNodes((nds) => nds.map(node => {
                     if (node.id === flag.messageId) {
-                        // Update node data to trigger the glowing red border
                         return { ...node, data: { ...node.data, fallacyType: flag.fallacyType, explanation: flag.explanation } };
                     }
                     return node;
@@ -72,40 +152,55 @@ function ArenaInterface() {
                 flagSub.unsubscribe();
             };
         }
-    }, [isConnected, stompClient, matchId, nodes]); // Include nodes to ensure edges connect properly
+    }, [isConnected, stompClient, matchId, nodes]);
 
-    const sendMessage = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!input.trim() || !stompClient) return;
-
+    const transmitMessage = (content: string) => {
+        if (!content.trim() || !stompClient) return;
         const payload = {
             matchId: matchId,
             sender: currentUser,
-            content: input,
-            messageId: `msg-${Date.now()}` // Generate a unique ID for the node
+            content: content,
+            messageId: `msg-${Date.now()}`
         };
-
         stompClient.publish({
             destination: `/app/debate/${matchId}/say`,
             body: JSON.stringify(payload)
         });
+    };
 
+    const handleManualSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        transmitMessage(input);
         setInput("");
     };
 
     return (
-        <div className="h-screen w-full flex flex-col bg-[#050505] font-mono">
+        <div className="h-screen w-full flex flex-col bg-[#050505] font-mono relative overflow-hidden">
             {/* Header */}
-            <div className="h-14 border-b border-[#1a1a1a] flex items-center justify-between px-6 bg-[#0a0a0a] z-10">
-                <span className="text-white font-bold">Arena: <span className="text-gray-500 text-xs">{matchId}</span></span>
+            <div className="h-14 border-b border-[#1a1a1a] flex items-center justify-between px-6 bg-[#0a0a0a] z-20">
+                <span className="text-white font-bold">Axiom A/V Arena <span className="text-purple-500">.</span></span>
                 <div className="flex items-center gap-2">
                     <span className="text-xs uppercase tracking-widest text-gray-500">{isConnected ? 'Live' : 'Connecting'}</span>
                     <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
                 </div>
             </div>
 
+            {/* Floating WebRTC Video Panel */}
+            <div className="absolute top-20 right-6 z-20 flex flex-col gap-4">
+                <div className="relative w-64 h-40 bg-[#121212] border border-[#222] rounded-xl overflow-hidden shadow-2xl">
+                    <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                    <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] text-gray-300 flex items-center gap-2">
+                        <Video size={10} className="text-yellow-500" /> Opponent
+                    </div>
+                </div>
+                <div className="relative w-48 h-32 bg-[#121212] border border-[#222] rounded-xl overflow-hidden shadow-xl self-end">
+                    <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
+                    <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] text-gray-300">You</div>
+                </div>
+            </div>
+
             {/* React Flow Canvas */}
-            <div className="flex-1 relative">
+            <div className="flex-1 relative z-10">
                 <ReactFlow 
                     nodes={nodes} 
                     edges={edges} 
@@ -119,17 +214,25 @@ function ArenaInterface() {
                 </ReactFlow>
             </div>
 
-            {/* Input Console */}
-            <div className="h-24 border-t border-[#1a1a1a] bg-[#0a0a0a] p-4 z-10">
-                <form onSubmit={sendMessage} className="max-w-4xl mx-auto flex gap-4 h-full items-center">
+            {/* Voice & Manual Input Console */}
+            <div className="h-24 border-t border-[#1a1a1a] bg-[#0a0a0a] p-4 z-20">
+                <form onSubmit={handleManualSubmit} className="max-w-5xl mx-auto flex gap-4 h-full items-center">
+                    <button 
+                        type="button"
+                        onClick={toggleMicrophone}
+                        className={`p-3 rounded-lg flex items-center justify-center transition-all duration-300 ${isListening ? 'bg-red-500/20 text-red-500 border border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-pulse' : 'bg-[#121212] text-gray-400 border border-[#222] hover:text-white'}`}
+                    >
+                        {isListening ? <Mic size={20} /> : <MicOff size={20} />}
+                    </button>
+                    
                     <input
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Construct your argument..."
-                        className="flex-1 bg-[#121212] border border-[#222] text-white px-4 py-3 rounded-lg focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500/50 transition-all"
-                        autoFocus
+                        placeholder={isListening ? "Listening for your argument..." : "Type your argument manually..."}
+                        className={`flex-1 bg-[#121212] border border-[#222] text-white px-4 py-3 rounded-lg focus:outline-none transition-all ${isListening ? 'border-red-500/50' : 'focus:border-purple-500 focus:ring-1 focus:ring-purple-500/50'}`}
                     />
+                    
                     <button 
                         type="submit" 
                         disabled={!isConnected || !input.trim()}
@@ -144,7 +247,6 @@ function ArenaInterface() {
     );
 }
 
-// Wrapper to provide the WebSocket Context
 export default function ArenaPage() {
     const [token, setToken] = useState<string | null>(null);
 

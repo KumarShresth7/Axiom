@@ -28,7 +28,6 @@ public class MatchmakingService {
         System.out.println(userEmail + " joined the queue with ELO " + eloRating);
     }
 
-    // Runs every 2 seconds to find pairs concurrently
     @Scheduled(fixedDelay = 2000)
     public void processQueue() {
         // Fetch everyone in the queue, sorted by ELO
